@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReSpeaker Sound Console</title>
+<style>
+:root{--bg:#0f1216;--card:#171b21;--line:#2b323c;--text:#e6ebf1;--dim:#8f9aa8;--L:#5fb3ff;--R:#ffb454;--trk:#7ee08a;--warn:#ff6b6b;--band:rgba(126,224,138,.08)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,-apple-system,sans-serif}
+main{max-width:1280px;margin:auto;padding:14px}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:13px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin:0 0 10px}
+.small{color:var(--dim);font-size:12px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.grid{display:grid;gap:12px}
+.top{grid-template-columns:minmax(300px,1.1fr) minmax(260px,1fr) minmax(240px,.8fr)}
+.mid{grid-template-columns:1fr 1fr}
+@media(max-width:900px){.top,.mid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+canvas{width:100%;display:block;background:#0b0e12;border-radius:5px}
+#spec,#resp{height:220px}
+svg{width:100%;display:block}
+.big{font:600 34px ui-monospace,Menlo,monospace}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px}
+.kv b{font-weight:500;color:var(--dim)}
+.meter{height:10px;background:#0b0e12;border-radius:5px;overflow:hidden;position:relative;margin:3px 0 8px}
+.meter i{position:absolute;left:0;top:0;bottom:0;width:0}
+.meter u{position:absolute;top:0;bottom:0;width:2px;background:#fff8;left:0}
+.cls{display:grid;grid-template-columns:1fr 54px;gap:4px 8px;align-items:center;font-size:13px}
+.cls .bar{grid-column:1/3;height:5px;background:#0b0e12;border-radius:3px;overflow:hidden;margin-bottom:4px}
+.cls .bar i{display:block;height:100%;background:var(--trk)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:nth-child(2),td:nth-child(2){text-align:left}
+th{color:var(--dim);font-weight:500}
+.events{max-height:300px;overflow:auto}
+form .row{display:grid;grid-template-columns:1fr 110px;gap:8px;align-items:center;margin:4px 0}
+form label{font-size:13px}
+input,select,button{background:#222831;color:var(--text);border:1px solid #3a4350;border-radius:5px;padding:5px 7px;font:inherit}
+input[type=number],input[type=text],select{width:100%}
+input.bad{border-color:var(--warn)}
+button{cursor:pointer}
+button.primary{background:#2c4a33;border-color:#3f6b49}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:4px 24px}
+.err{color:var(--warn);font-size:12px;min-height:16px}
+.legend span{margin-right:12px}
+.legend i{display:inline-block;width:10px;height:3px;margin-right:4px;vertical-align:middle}
+</style>
+</head>
+<body>
+<main>
+<h1>ReSpeaker Sound Console</h1>
+<div id="status" class="small mono">connecting…</div>
+
+<div class="grid top" style="margin-top:12px">
+  <div class="card">
+    <h2>Bearing</h2>
+    <svg id="dial" viewBox="-110 -110 220 220" aria-label="bearing dial"></svg>
+    <div style="display:flex;justify-content:space-between;align-items:end;margin-top:6px">
+      <div><div id="bearing" class="big">—</div><div class="small">track, + = right of board front</div></div>
+      <div class="kv mono">
+        <b>strength</b><span id="strength">—</span>
+        <b>frame</b><span id="fbear">—</span>
+        <b>coherence</b><span id="coh">—</span>
+        <b>delay</b><span id="tau">—</span>
+      </div>
+    </div>
+    <div style="margin-top:8px"><button onclick="post('/track/reset',{})">Reset track</button>
+    <span class="small">Rear half mirrors the front: 2 mics cannot tell front from back.</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Sound ID</h2>
+    <div id="clsstate" class="small" style="margin-bottom:8px">—</div>
+    <div id="cls" class="cls"></div>
+  </div>
+
+  <div class="card">
+    <h2>Levels</h2>
+    <div class="small">Left mic <span id="lL" class="mono"></span></div>
+    <div class="meter"><i id="mL" style="background:var(--L)"></i></div>
+    <div class="small">Right mic <span id="lR" class="mono"></span></div>
+    <div class="meter"><i id="mR" style="background:var(--R)"></i></div>
+    <div class="small">Band level vs noise floor <span id="lB" class="mono"></span></div>
+    <div class="meter"><i id="mB" style="background:var(--trk)"></i><u id="mF"></u></div>
+    <div class="kv mono">
+      <b>SNR</b><span id="snr">—</span>
+      <b>active</b><span id="act">—</span>
+      <b>peak L/R</b><span id="pk">—</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid mid" style="margin-top:12px">
+  <div class="card">
+    <h2>Spectrum</h2>
+    <canvas id="spec"></canvas>
+    <div class="small legend" style="margin-top:6px"><span><i style="background:var(--L)"></i>Left</span><span><i style="background:var(--R)"></i>Right</span><span><i style="background:var(--trk);opacity:.4"></i>analysis band</span></div>
+  </div>
+  <div class="card">
+    <h2>Delay response (GCC-PHAT)</h2>
+    <canvas id="resp"></canvas>
+    <div class="small" style="margin-top:6px">Peak = inter-mic delay. Dashed lines = ±d/c, the physical limit for the configured spacing. Peaks outside them mean the spacing is wrong or it's an echo.</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px">
+  <h2>Events</h2>
+  <div class="events"><table>
+    <thead><tr><th>time</th><th>sound</th><th>bearing</th><th>spread</th><th>dur s</th><th>peak dB</th><th>coh</th></tr></thead>
+    <tbody id="evrows"></tbody>
+  </table></div>
+</div>
+
+<div class="grid mid" style="margin-top:12px">
+  <div class="card">
+    <h2>Settings</h2>
+    <form id="settings" onsubmit="applySettings(event)">
+      <div class="cols" id="fields"></div>
+      <div class="err" id="seterr"></div>
+      <button class="primary" type="submit">Apply</button>
+      <button type="button" onclick="loadConfig()">Revert</button>
+      <span class="small" id="setok"></span>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Calibrate mic spacing</h2>
+    <p class="small" style="margin-top:0">Stand directly off one END of the board, in line with both mics (that is ±90°), and make broadband noise — hiss, rub fabric, crinkle paper — for the whole window. The largest consistent delay is the spacing. Doing it from the right side also confirms channel order: the result should say <span class="mono">right</span>.</p>
+    <div class="row" style="display:flex;gap:8px;align-items:center">
+      <label for="calsec">Seconds</label><input id="calsec" type="number" value="5" min="1" max="30" step="1" style="width:80px">
+      <button onclick="startCal()">Start</button>
+      <span id="calstat" class="small mono"></span>
+    </div>
+    <div id="calres" class="mono" style="margin-top:8px"></div>
+    <h2 style="margin-top:16px">Health</h2>
+    <div id="health" class="small mono" style="white-space:pre-wrap"></div>
+  </div>
+</div>
+</main>
+
+<script>
+const API = new URLSearchParams(location.search).get('host') ? 'http://' + new URLSearchParams(location.search).get('host') : '';
+const $ = id => document.getElementById(id);
+let cfg = null, limits = null, lastEvent = 0, trail = [];
+
+async function get(p){ const r = await fetch(API + p, {cache:'no-store'}); return r.json(); }
+async function post(p, body){
+  const r = await fetch(API + p, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  return r.json();
+}
+const fmt = (v, d=1, u='') => v === null || v === undefined ? '—' : Number(v).toFixed(d) + u;
+
+// ── settings form ─────────────────────────────────────────────────────────
+const FIELDS = [
+  ['Geometry', [['spacing_mm','Mic spacing, mm',.1],['speed_of_sound','Speed of sound, m/s',.1],['swap_channels','Swap L/R channels']]],
+  ['Direction', [['band_lo_hz','Band low, Hz',10],['band_hi_hz','Band high, Hz',10],['nfft','FFT size'],['snr_db','Activity SNR, dB',.5],['coherence_min','Min coherence',.01],['floor_rise_db_s','Floor rise, dB/s',.1],['track_half_life_s','Track half-life, s',.05],['track_min_strength','Track min strength',.05],['event_hangover_s','Event hangover, s',.05]]],
+  ['Sound ID', [['classify_enabled','Classifier on'],['classify_only_active','Only when active'],['classify_hop_s','Classify every, s',.05],['class_min_score','Min score for events',.01],['ignore_classes','Ignore classes (comma list)']]],
+  ['Codec', [['pga_db','Mic PGA gain, dB',.5],['agc','Codec AGC'],['adc_hpf','ADC high-pass']]],
+];
+function buildForm(){
+  const box = $('fields'); box.innerHTML = '';
+  for (const [title, list] of FIELDS){
+    const g = document.createElement('div');
+    g.innerHTML = `<div class="small" style="margin:6px 0 2px;color:var(--text)">${title}</div>`;
+    for (const [k, label, step] of list){
+      const lim = limits[k] || {}, v = cfg[k];
+      let input;
+      if (lim.choices) input = `<select id="f_${k}">${lim.choices.map(c=>`<option ${c==v?'selected':''}>${c}</option>`).join('')}</select>`;
+      else if (typeof v === 'boolean') input = `<input id="f_${k}" type="checkbox" ${v?'checked':''} style="justify-self:start">`;
+      else if (Array.isArray(v)) input = `<input id="f_${k}" type="text" value="${v.join(', ')}">`;
+      else input = `<input id="f_${k}" type="number" value="${v}" min="${lim.min}" max="${lim.max}" step="${step||'any'}">`;
+      g.insertAdjacentHTML('beforeend', `<div class="row"><label for="f_${k}">${label}</label>${input}</div>`);
+    }
+    box.appendChild(g);
+  }
+}
+async function loadConfig(){
+  const c = await get('/config'); cfg = c.settings; limits = c.limits; buildForm();
+  $('seterr').textContent = ''; $('setok').textContent = '';
+}
+async function applySettings(ev){
+  ev.preventDefault();
+  const out = {};
+  for (const k of Object.keys(cfg)){
+    const el = $('f_' + k); if (!el) continue; el.classList.remove('bad');
+    let v;
+    if (el.type === 'checkbox') v = el.checked;
+    else if (Array.isArray(cfg[k])) v = el.value.split(',').map(s=>s.trim()).filter(Boolean);
+    else if (el.tagName === 'SELECT') v = typeof cfg[k] === 'number' ? Number(el.value) : el.value;
+    else v = Number(el.value);
+    if (JSON.stringify(v) !== JSON.stringify(cfg[k])) out[k] = v;
+  }
+  if (!Object.keys(out).length){ $('setok').textContent = 'nothing changed'; return; }
+  const r = await post('/config', out);
+  if (!r.ok){
+    $('seterr').textContent = Object.entries(r.errors).map(([k,e])=>`${k}: ${e}`).join(' · ');
+    for (const k in r.errors) $('f_' + k)?.classList.add('bad');
+    return;
+  }
+  cfg = r.settings; $('seterr').textContent = '';
+  const ce = Object.entries(r.codec_errors || {}).map(([k,e])=>`${k}: ${e}`).join(' · ');
+  $('setok').textContent = 'applied: ' + r.changed.join(', ') + (r.save_error ? ' (NOT saved: ' + r.save_error + ')' : '') + (ce ? ' — codec: ' + ce : '');
+}
+
+// ── calibration ───────────────────────────────────────────────────────────
+let calTimer = null;
+async function startCal(){
+  await post('/calibrate', {seconds: Number($('calsec').value) || 5});
+  $('calres').textContent = '';
+  clearInterval(calTimer);
+  calTimer = setInterval(async () => {
+    const c = await get('/calibrate');
+    if (c.running){ $('calstat').textContent = `${c.remaining_s} s left · ${c.frames} frames`; return; }
+    clearInterval(calTimer); $('calstat').textContent = 'done';
+    const r = c.result;
+    if (!r || !r.spacing_mm){ $('calres').textContent = `not enough coherent frames (${r ? r.frames : 0}) — louder, closer, broadband`; return; }
+    $('calres').innerHTML = `measured ${r.spacing_mm} mm from ${r.frames} frames · source on the <b>${r.source_side}</b> ` +
+      `<button onclick="useSpacing(${r.spacing_mm})">Use ${r.spacing_mm} mm</button>`;
+  }, 400);
+}
+async function useSpacing(mm){ const r = await post('/config', {spacing_mm: mm}); if (r.ok){ cfg = r.settings; buildForm(); } }
+
+// ── dial ──────────────────────────────────────────────────────────────────
+function pol(deg, r){ const a = deg * Math.PI / 180; return [r * Math.sin(a), -r * Math.cos(a)]; }
+function dialBase(){
+  let s = '';
+  s += `<circle r="100" fill="none" stroke="#2b323c"/><circle r="66" fill="none" stroke="#20262e"/><circle r="33" fill="none" stroke="#20262e"/>`;
+  for (let d = -180; d < 180; d += 30){
+    const [x1,y1] = pol(d, 92), [x2,y2] = pol(d, 100);
+    s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#3a4350"/>`;
+    if (Math.abs(d) <= 90){ const [tx,ty] = pol(d, 82); s += `<text x="${tx}" y="${ty+3}" fill="#8f9aa8" font-size="8" text-anchor="middle">${d}</text>`; }
+  }
+  s += `<line x1="-104" y1="0" x2="104" y2="0" stroke="#3a4350" stroke-dasharray="2 3"/>`;
+  s += `<rect x="-14" y="-4" width="28" height="8" rx="2" fill="#2b323c"/><circle cx="-9" r="2.5" fill="var(--L)"/><circle cx="9" r="2.5" fill="var(--R)"/>`;
+  s += `<text x="0" y="-102" fill="#8f9aa8" font-size="8" text-anchor="middle">FRONT</text>`;
+  return s;
+}
+const DIAL_BASE = dialBase();
+function drawDial(st){
+  const now = performance.now();
+  if (st.frame && st.frame.active) trail.push([st.frame.bearing_deg, now, st.frame.coherence]);
+  trail = trail.filter(t => now - t[1] < 3000);
+  let s = DIAL_BASE;
+  for (const [b, t, c] of trail){
+    const o = Math.max(0, 1 - (now - t) / 3000) * Math.min(1, c * 1.5);
+    const [x,y] = pol(b, 72); s += `<circle cx="${x}" cy="${y}" r="3" fill="var(--R)" opacity="${o.toFixed(2)}"/>`;
+  }
+  const tr = st.track;
+  if (tr && tr.tracking){
+    const [x,y] = pol(tr.bearing_deg, 96), [mx,my] = pol(180 - tr.bearing_deg, 96);
+    s += `<line x1="0" y1="0" x2="${mx}" y2="${my}" stroke="var(--trk)" stroke-width="2" stroke-dasharray="4 4" opacity=".35"/>`;
+    s += `<line x1="0" y1="0" x2="${x}" y2="${y}" stroke="var(--trk)" stroke-width="3" stroke-linecap="round"/>`;
+  }
+  $('dial').innerHTML = s;
+}
+
+// ── plots ─────────────────────────────────────────────────────────────────
+function fitCanvas(c){ const d = devicePixelRatio || 1, w = c.clientWidth * d, h = c.clientHeight * d; if (c.width !== w || c.height !== h){ c.width = w; c.height = h; } return [c.getContext('2d'), w, h, d]; }
+function drawSpec(sp){
+  const [x, w, h, d] = fitCanvas($('spec')); x.clearRect(0,0,w,h);
+  if (!sp.L) return;
+  const f = sp.freq, fmin = f[0], fmax = f[f.length-1], dbmin = -120, dbmax = -20;
+  const X = v => Math.log(v / fmin) / Math.log(fmax / fmin) * w, Y = db => (dbmax - db) / (dbmax - dbmin) * h;
+  x.fillStyle = 'rgba(126,224,138,.08)'; x.fillRect(X(sp.band[0]), 0, X(sp.band[1]) - X(sp.band[0]), h);
+  x.font = `${10*d}px system-ui`; x.fillStyle = '#8f9aa8'; x.strokeStyle = '#20262e'; x.lineWidth = 1;
+  for (let db = dbmin; db <= dbmax; db += 20){ const y = Y(db); x.beginPath(); x.moveTo(0,y); x.lineTo(w,y); x.stroke(); x.fillText(db + ' dB', 4*d, y - 3*d); }
+  for (const hz of [100, 300, 1000, 3000, 10000]){ if (hz < fmin || hz > fmax) continue; const xx = X(hz); x.beginPath(); x.moveTo(xx,0); x.lineTo(xx,h); x.stroke(); x.fillText(hz >= 1000 ? hz/1000 + 'k' : hz, xx + 3*d, h - 4*d); }
+  for (const [v, col] of [[sp.L, '#5fb3ff'], [sp.R, '#ffb454']]){
+    x.strokeStyle = col; x.lineWidth = 1.3 * d; x.beginPath();
+    v.forEach((db, i) => { const xx = X(f[i]), yy = Math.min(h, Math.max(0, Y(db))); i ? x.lineTo(xx,yy) : x.moveTo(xx,yy); });
+    x.stroke();
+  }
+}
+function drawResp(sp){
+  const [x, w, h, d] = fitCanvas($('resp')); x.clearRect(0,0,w,h);
+  const r = sp.response; if (!r) return;
+  const t = r.tau_us, n = t.length, tmin = t[0], tmax = t[n-1];
+  const X = v => (v - tmin) / (tmax - tmin) * w, Y = v => (1 - (v + 0.2) / 1.2) * h;
+  x.font = `${10*d}px system-ui`; x.fillStyle = '#8f9aa8'; x.strokeStyle = '#20262e'; x.lineWidth = 1;
+  for (const v of [0, 0.5, 1]){ const y = Y(v); x.beginPath(); x.moveTo(0,y); x.lineTo(w,y); x.stroke(); x.fillText(v.toFixed(1), 4*d, y - 3*d); }
+  x.setLineDash([4*d, 4*d]); x.strokeStyle = '#8f9aa8';
+  for (const s of [-1, 1]){ const xx = X(s * r.tau_max_us); x.beginPath(); x.moveTo(xx,0); x.lineTo(xx,h); x.stroke(); }
+  x.setLineDash([]);
+  x.fillText('← source left', 4*d, h - 4*d); x.textAlign = 'right'; x.fillText(`±d/c = ${r.tau_max_us.toFixed(0)} µs · source right →`, w - 4*d, h - 4*d); x.textAlign = 'left';
+  x.strokeStyle = '#7ee08a'; x.lineWidth = 1.5 * d; x.beginPath();
+  r.r.forEach((v, i) => { const xx = X(-t[i]), yy = Y(v); i ? x.lineTo(xx,yy) : x.moveTo(xx,yy); });
+  x.stroke();
+}
+
+// ── polling ───────────────────────────────────────────────────────────────
+function meter(el, db, lo=-90, hi=0){ el.style.width = Math.max(0, Math.min(100, (db - lo) / (hi - lo) * 100)) + '%'; }
+async function pollState(){
+  try{
+    const st = await get('/state');
+    const tr = st.track, f = st.frame || {};
+    $('bearing').textContent = tr.tracking ? (tr.bearing_deg > 0 ? '+' : '') + tr.bearing_deg.toFixed(1) + '°' : '—';
+    $('strength').textContent = fmt(tr.strength, 2);
+    $('fbear').textContent = f.active ? fmt(f.bearing_deg, 1, '°') : '(quiet)';
+    $('coh').textContent = fmt(f.coherence, 2);
+    $('tau').textContent = f.tau_us === undefined ? '—' : f.tau_us + ' µs' + (f.in_range ? '' : ' ⚠');
+    drawDial(st);
+    const [l, r] = st.level_db || [null, null];
+    $('lL').textContent = fmt(l, 1, ' dBFS'); $('lR').textContent = fmt(r, 1, ' dBFS');
+    if (l !== null){ meter($('mL'), l); meter($('mR'), r); }
+    $('lB').textContent = `${fmt(st.band_db,1)} / floor ${fmt(f.floor_db,1)} dBFS`;
+    if (st.band_db !== null){ meter($('mB'), st.band_db); $('mF').style.left = Math.max(0, Math.min(100, (f.floor_db + 90) / 90 * 100)) + '%'; }
+    $('snr').textContent = fmt(f.snr_db, 1, ' dB'); $('act').textContent = f.active ? 'yes' : 'no';
+    $('pk').textContent = (st.peak_db || []).map(v => fmt(v, 1)).join(' / ') + ' dBFS';
+    const s = st.sound || {};
+    $('clsstate').textContent = s.idle ? 'waiting for sound (classifier runs only when active)' : (s.age_s !== undefined ? `updated ${s.age_s}s ago` : '');
+    $('cls').innerHTML = (s.top || []).map(c => `<span>${c.label}</span><span class="mono" style="text-align:right">${c.score.toFixed(2)}</span><div class="bar"><i style="width:${Math.round(c.score*100)}%"></i></div>`).join('');
+    $('status').textContent = (st.running ? 'capturing' : 'NOT capturing') + (st.in_event ? ' · event' : '');
+    $('status').style.color = st.running ? '' : 'var(--warn)';
+  }catch(e){ $('status').textContent = 'no connection: ' + e; $('status').style.color = 'var(--warn)'; }
+}
+async function pollSpectrum(){ try{ const sp = await get('/spectrum'); drawSpec(sp); drawResp(sp); }catch(e){} }
+async function pollEvents(){
+  try{
+    const r = await get('/events?since=' + lastEvent);
+    const tb = $('evrows');
+    for (const e of r.events){
+      lastEvent = Math.max(lastEvent, e.id);
+      const lab = e.label ? `${e.label} <span class="small">${e.labels[e.label].toFixed(2)}</span>` : '<span class="small">—</span>';
+      tb.insertAdjacentHTML('afterbegin', `<tr><td class="mono">${new Date(e.time*1000).toLocaleTimeString()}</td><td>${lab}</td><td class="mono">${e.bearing_deg > 0 ? '+' : ''}${e.bearing_deg.toFixed(1)}°</td><td class="mono">${e.spread_deg.toFixed(1)}°</td><td class="mono">${e.duration_s.toFixed(2)}</td><td class="mono">${e.peak_db.toFixed(1)}</td><td class="mono">${e.coherence.toFixed(2)}</td></tr>`);
+    }
+    while (tb.rows.length > 100) tb.deleteRow(-1);
+  }catch(e){}
+}
+async function pollHealth(){
+  try{
+    const h = await get('/health'), c = h.counters, k = h.classifier;
+    const lines = [
+      `device ${h.device} · ${h.rate} Hz · FFT ${h.nfft} · hop ${h.hop_ms} ms`,
+      `DSP ${fmt(h.proc_ms_mean,2)} ms mean / ${fmt(h.proc_ms_max,2)} ms max per hop`,
+      `frames ${c.frames} · active ${c.active_frames} · events ${c.events} · overruns ${c.overruns} · clipped ${c.clipped} · capture restarts ${c.capture_starts - 1}`,
+      k.ready ? `YAMNet on ${k.runtime} · ${fmt(k.last_ms,0)} ms/run · runs ${c.classify_runs} · skipped ${c.classify_skipped}` : `classifier off: ${k.error}`,
+    ];
+    if (h.capture_error) lines.push('CAPTURE: ' + h.capture_error);
+    const ce = Object.entries(h.codec_errors || {}); if (ce.length) lines.push('codec: ' + ce.map(([a,b]) => a + ' ' + b).join('; '));
+    $('health').textContent = lines.join('\n');
+  }catch(e){}
+}
+
+loadConfig();
+setInterval(pollState, 100); setInterval(pollSpectrum, 250); setInterval(pollEvents, 1000); setInterval(pollHealth, 1000);
+pollEvents(); pollHealth();
+</script>
+</body>
+</html>

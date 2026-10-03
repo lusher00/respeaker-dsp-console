@@ -1,0 +1,26 @@
+[Unit]
+Description=ReSpeaker 2-Mics HAT sound daemon — bearing, activity, sound ID over HTTP
+After=sound.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# install.sh rewrites User, WorkingDirectory and ExecStart for whoever runs it.
+User=pi
+WorkingDirectory=/home/pi/respeaker-dsp-console
+EnvironmentFile=-/etc/default/respeaker-console
+ExecStart=/usr/bin/python3 /home/pi/respeaker-dsp-console/server.py
+# /dev/snd is root:audio. A system service gets no logind seat ACL, so the
+# group has to be granted here; no re-login needed.
+SupplementaryGroups=audio
+# Runtime settings changed from the page persist in /var/lib/respeaker-console,
+# outside the tree, so a deploy (rsync --delete) cannot wipe them.
+StateDirectory=respeaker-console
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

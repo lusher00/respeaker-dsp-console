@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.swp
+models/*.tflite
+settings.json
+settings.tmp
